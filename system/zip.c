@@ -1,3 +1,6 @@
+#include <string.h>
+#include <dos/dos.h>
+#include <proto/dos.h>
 #include "std/debug.h"
 #include "std/memory.h"
 #include "system/zip.h"

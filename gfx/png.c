@@ -1,3 +1,7 @@
+#include <stdio.h>
+#include <string.h>
+#include <dos/dos.h>
+#include <proto/dos.h>
 #include "std/debug.h"
 #include "std/memory.h"
 #include "std/resource.h"

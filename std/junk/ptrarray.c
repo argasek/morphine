@@ -2,7 +2,7 @@
 
 #include "std/debug.h"
 #include "std/memory.h"
-#include "std/ptrarray.h"
+#include "std/junk/ptrarray.h"
 
 static void DeletePtrArray(PtrArrayT *self) {
   if (self->managed)

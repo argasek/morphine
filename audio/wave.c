@@ -1,3 +1,5 @@
+#include <string.h>
+#include <proto/dos.h>
 #include "audio/wave.h"
 #include "std/debug.h"
 #include "std/memory.h"

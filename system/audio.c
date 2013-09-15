@@ -1,3 +1,4 @@
+#include <string.h>
 #include <devices/audio.h>
 #include <hardware/intbits.h>
 #include <exec/exec.h>

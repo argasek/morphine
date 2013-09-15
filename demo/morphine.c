@@ -35,7 +35,7 @@ const int DEPTH = 8;
 const int H_RAYS = 41;
 const int V_RAYS = 33;
 
-const char *DemoConfigPath = "wpz-wcca.json";
+const char *DemoConfigPath = "morphine.json";
 
 static AudioStreamT *TheMusic = NULL;
 static PixBufT *TheLoadImg = NULL;
@@ -635,4 +635,4 @@ CALLBACK(FeedAudioStream) {
   AudioStreamFeed(TheMusic);
 }
 
-#include "wpz-wcca.syms"
+#include "morphine.syms"

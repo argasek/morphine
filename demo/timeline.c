@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <string.h>
 #include "std/debug.h"
 #include "std/memory.h"
 #include "std/resource.h"

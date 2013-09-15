@@ -1,3 +1,4 @@
+#include <string.h>
 #include <exec/execbase.h>
 #include <proto/exec.h>
 

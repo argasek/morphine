@@ -1,6 +1,7 @@
 #ifndef __STD_ARRAY_H__
 #define __STD_ARRAY_H__
 
+#include <string.h>
 #include "std/types.h"
 #include "std/memory.h"
 

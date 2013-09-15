@@ -1,3 +1,4 @@
+#include <string.h>
 #include "engine/scene.h"
 #include "std/memory.h"
 #include "std/list.h"

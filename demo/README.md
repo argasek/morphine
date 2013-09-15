@@ -85,7 +85,7 @@ Parameter definition macro takes 3 arguments.
 
 * `TYPE` is C type of the variable,
 * `SYMBOL` is the name of variable, which is visible in C and [JSON] under the same name.
-* `VALUE` is the inital value of variable (only value of basic C type allowed).
+* `VALUE` is the initial value of variable (only value of basic C type allowed).
 
 ## Configuration
 

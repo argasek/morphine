@@ -1,7 +1,7 @@
 #include <strings.h>
 #include <proto/exec.h>
 
-#include "std/atompool.h"
+#include "std/junk/atompool.h"
 #include "std/memory.h"
 #include "std/debug.h"
 

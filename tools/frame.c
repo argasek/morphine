@@ -1,4 +1,5 @@
 #include <proto/exec.h>
+#include <string.h>
 #include <proto/graphics.h>
 
 #include <stdarg.h>

@@ -1,3 +1,4 @@
+#include <string.h>
 #include "engine/mesh.h"
 #include "gfx/pixbuf.h"
 #include "std/debug.h"

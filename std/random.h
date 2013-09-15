@@ -13,4 +13,12 @@ static inline int32_t RandomInt32(int32_t *i) {
   return a;
 }
 
+typedef struct Random {
+  uint32_t value;
+  uint32_t seed;
+} RandomT;
+
+__regargs int NextRandom(RandomT *random);
+__regargs float NextRandomFloat(RandomT *random, float lo, float hi);
+
 #endif
