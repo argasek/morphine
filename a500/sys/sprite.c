@@ -1,13 +1,14 @@
-#include <exec/memory.h>
-#include <proto/exec.h>
+#include <graphics/gfxbase.h>
+#include <proto/graphics.h>
 
 #include "sprite.h"
+#include "memory.h"
 
 __regargs SpriteT *NewSprite(UWORD height, BOOL attached) {
-  SpriteT *sprite = AllocMem(sizeof(SpriteT), MEMF_PUBLIC|MEMF_CLEAR);
+  SpriteT *sprite = MemAlloc(sizeof(SpriteT), MEMF_PUBLIC|MEMF_CLEAR);
 
   sprite->height = height;
-  sprite->data = AllocMem((height ? (height + 2) : 1) * 4, MEMF_CHIP|MEMF_CLEAR);
+  sprite->data = MemAlloc((height ? (height + 2) : 1) * 4, MEMF_CHIP|MEMF_CLEAR);
 
   if (attached)
     sprite->attached = NewSprite(height, FALSE);
@@ -20,26 +21,28 @@ __regargs SpriteT *NewSpriteFromBitmap(UWORD height, BitmapT *bitmap,
 {
   SpriteT *sprite = NewSprite(height, bitmap->depth == 4);
   WORD yend = ystart + sprite->height;
+  LONG start = ystart * bitmap->bytesPerRow / 2 + xstart / 16;
+  LONG stride = bitmap->bytesPerRow / 2;
 
   if (bitmap->depth == 2) {
     UWORD *data = &sprite->data[2];
-    UWORD *bpl0 = (UWORD *)bitmap->planes[0] + ystart * 2;
-    UWORD *bpl1 = (UWORD *)bitmap->planes[1] + ystart * 2;
+    UWORD *bpl0 = (UWORD *)bitmap->planes[0] + start;
+    UWORD *bpl1 = (UWORD *)bitmap->planes[1] + start;
 
     for (; ystart < yend; ystart++) {
       *data++ = *bpl0;
       *data++ = *bpl1;
 
-      bpl0 += 2;
-      bpl1 += 2;
+      bpl0 += stride;
+      bpl1 += stride;
     }
   } else {
     UWORD *data0 = &sprite->data[2];
     UWORD *data1 = &sprite->attached->data[2];
-    UWORD *bpl0 = (UWORD *)bitmap->planes[0] + ystart * 4;
-    UWORD *bpl1 = (UWORD *)bitmap->planes[1] + ystart * 4;
-    UWORD *bpl2 = (UWORD *)bitmap->planes[2] + ystart * 4;
-    UWORD *bpl3 = (UWORD *)bitmap->planes[3] + ystart * 4;
+    UWORD *bpl0 = (UWORD *)bitmap->planes[0] + start;
+    UWORD *bpl1 = (UWORD *)bitmap->planes[1] + start;
+    UWORD *bpl2 = (UWORD *)bitmap->planes[2] + start;
+    UWORD *bpl3 = (UWORD *)bitmap->planes[3] + start;
 
     for (; ystart < yend; ystart++) {
       *data0++ = *bpl0;
@@ -47,22 +50,32 @@ __regargs SpriteT *NewSpriteFromBitmap(UWORD height, BitmapT *bitmap,
       *data1++ = *bpl2;
       *data1++ = *bpl3;
 
-      bpl0 += 4;
-      bpl1 += 4;
-      bpl2 += 4;
-      bpl3 += 4;
+      bpl0 += stride;
+      bpl1 += stride;
+      bpl2 += stride;
+      bpl3 += stride;
     }
   }
 
   return sprite;
 }
 
+__regargs SpriteT *CloneSystemPointer() {
+  struct SimpleSprite *sprite = GfxBase->SimpleSprites[0];
+  UWORD height = sprite->height;
+  SpriteT *pointer = NewSprite(height, FALSE);
+
+  memcpy(pointer->data + 2, sprite->posctldata + 2, height * sizeof(LONG));
+
+  return pointer;
+}
+
 __regargs void DeleteSprite(SpriteT *sprite) {
   if (sprite->attached)
     DeleteSprite(sprite->attached);
 
-  FreeMem(sprite->data, (sprite->height + 2) * 4);
-  FreeMem(sprite, sizeof(SpriteT));
+  MemFree(sprite->data, (sprite->height + 2) * 4);
+  MemFree(sprite, sizeof(SpriteT));
 }
 
 __regargs void UpdateSprite(SpriteT *sprite) {

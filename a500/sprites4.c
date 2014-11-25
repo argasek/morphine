@@ -1,22 +1,27 @@
+#include "startup.h"
 #include "hardware.h"
 #include "coplist.h"
 #include "ilbm.h"
-#include "print.h"
 #include "sprite.h"
-
-#define X(x) ((x) + 0x81)
-#define Y(y) ((y) + 0x2c)
 
 static BitmapT *screen;
 static BitmapT *bitmap;
 static CopListT *cp;
 static SpriteT *nullspr;
 static SpriteT *sprite[3];
+static CopInsT *sprptr[8];
 
-void Load() {
-  screen = NewBitmap(320, 256, 1, FALSE);
-  bitmap = LoadILBM("data/sprites4.ilbm", TRUE);
+static void Load() {
+  screen = NewBitmap(320, 256, 1);
+  bitmap = LoadILBM("data.bak/sprites4.ilbm");
   cp = NewCopList(100);
+
+  CopInit(cp);
+  CopMakePlayfield(cp, NULL, screen, screen->depth);
+  CopMakeDispWin(cp, X(0), Y(0), screen->width, screen->height);
+  CopLoadPal(cp, bitmap->palette, 16);
+  CopMakeSprites(cp, sprptr, nullspr);
+  CopEnd(cp);
 
   sprite[0] = NewSpriteFromBitmap(19, bitmap, 0, 0);
   sprite[1] = NewSpriteFromBitmap(24, bitmap, 0, 19);
@@ -28,7 +33,7 @@ void Load() {
   nullspr = NewSprite(0, FALSE);
 }
 
-void Kill() {
+static void UnLoad() {
   DeleteSprite(nullspr);
   DeleteSprite(sprite[0]);
   DeleteSprite(sprite[1]);
@@ -38,8 +43,6 @@ void Kill() {
   DeleteBitmap(bitmap);
   DeleteBitmap(screen);
 }
-
-static CopInsT *sprptr;
 
 static void MoveSprite() {
   static UWORD counter = 0;
@@ -59,43 +62,21 @@ static void MoveSprite() {
   sprite[i]->x = x;
   UpdateSprite(sprite[i]);
 
-  if (sprptr)
-    CopInsSet32(sprptr, sprite[i]->data);
+  if (sprptr[0])
+    CopInsSet32(sprptr[0], sprite[i]->data);
 
   counter++;
 }
 
-void Main() {
-  CopInit(cp);
-
-  CopMove16(cp, bplcon0, BPLCON0_BPU(screen->depth) | BPLCON0_COLOR);
-  CopMove16(cp, bplcon1, 0);
-  CopMove16(cp, bplcon2, 0x24);
-  CopMove32(cp, bplpt[0], screen->planes[0]);
-
-  CopMove16(cp, ddfstrt, 0x38);
-  CopMove16(cp, ddfstop, 0xd0);
-
-  {
-    UWORD i;
-
-    sprptr = CopMove32(cp, sprpt[0], sprite[0]->data);
-
-    for (i = 1; i < 8; i++)
-      CopMove32(cp, sprpt[i], nullspr->data);
-  }
-
-  CopMakeDispWin(cp, X(0), Y(0), screen->width, screen->height);
-  CopLoadPal(cp, bitmap->palette, 16);
-
-  CopEnd(cp);
+static void Init() {
   CopListActivate(cp);
-
-  custom->dmacon = DMAF_SETCLR | DMAF_RASTER | DMAF_SPRITE | DMAF_MASTER;
-
-  while (!LeftMouseButton()) {
-    WaitLine(Y(256));
-    MoveSprite();
-    WaitVBlank();
-  }
+  custom->dmacon = DMAF_SETCLR | DMAF_RASTER | DMAF_SPRITE;
 }
+
+static void Render() {
+  WaitLine(Y(256));
+  MoveSprite();
+  WaitVBlank();
+}
+
+EffectT Effect = { Load, UnLoad, Init, NULL, Render };

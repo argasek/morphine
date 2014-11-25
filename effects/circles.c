@@ -95,7 +95,7 @@ void RenderDisks(int frameNumber) {
 
     DrawCircle(buffer, (WIDTH - 256) >> 1, 0, 256);
 
-    y = 64 + 8;
+    y = 64 + 9;
     DrawTripleLine(buffer, y);
 
     y = 64 + 128 - 8;

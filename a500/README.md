@@ -5,7 +5,7 @@ Amiga 500 Hardware Programming Examples
 
 1. [Amiga Hardware Reference Manual](http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node0000.html)
 
-2. [MC68000 instruction timing](http://oldwww.nvg.ntnu.no/amiga/MC680x0_Sections/mc68000timing.HTML)
+2. [MC68000 instruction timing](http://linas.org/mirrors/www.nvg.ntnu.no/2002.09.16/amiga/MC680x0_Sections/mc68000timing.HTML)
 
 3. [Custom Register Index](http://www.winnicki.net/amiga/memmap/)
 
@@ -17,6 +17,7 @@ Amiga 500 Hardware Programming Examples
    * [Asm / Hardware](http://eab.abime.net/forumdisplay.php?f=112)
    * [Undocumented Amiga hardware stuff](http://eab.abime.net/showthread.php?t=19676)
 
-2. Amiga Demoscene Archive Forum: [coding](http://ada.untergrund.net/forum/index.php?action=vtopic&forum=4).
+2. Amiga Demoscene Archive Forum: [coding](http://ada.untergrund.net/?p=boardforums&forum=4)
+   * [Atari style C2P](http://ada.untergrund.net/?p=boardthread&id=217)
 
-3. [Subpixel line drawing using Blitter](http://scalibq.wordpress.com/2011/12/28/just-keeping-it-real-part-5/)
+3. Subpixel line drawing using Blitter: [part 1](http://scalibq.wordpress.com/2011/12/28/just-keeping-it-real-part-5/) and [part 2](http://scalibq.wordpress.com/2012/01/06/just-keeping-it-real-part-5-1/).

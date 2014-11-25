@@ -9,91 +9,182 @@
 
 #include "hardware.h"
 #include "interrupts.h"
+#include "keyboard.h"
+#include "mouse.h"
 #include "print.h"
+#include "startup.h"
 
-extern void Load();
-extern void Kill();
-extern void Main();
+extern EffectT Effect;
 
 int __nocommandline = 1;
 int __initlibraries = 0;
 
 struct DosLibrary *DOSBase = NULL;
 struct GfxBase *GfxBase = NULL;
+struct Library *MathBase = NULL;
+
+LONG frameCount;
+LONG lastFrameCount;
+
+static __interrupt_handler void IntLevel2Handler() {
+  /* Make sure all scratchpad registers are saved, because we call a function
+   * that relies on the fact that it's caller responsibility to save them. */
+  asm volatile("" ::: "d0", "d1", "a0", "a1");
+
+  if (keyboardActive && (custom->intreqr & INTF_PORTS))
+    KeyboardIntHandler();
+
+  custom->intreq = INTF_PORTS;
+  custom->intreq = INTF_PORTS;
+}
+
+static __interrupt_handler void IntLevel3Handler() {
+  asm volatile("" ::: "d0", "d1", "a0", "a1");
+
+  if (mouseActive && (custom->intreqr & INTF_VERTB))
+    MouseIntHandler();
+
+  if (Effect.InterruptHandler)
+    Effect.InterruptHandler();
+
+  custom->intreq = INTF_LEVEL3;
+  custom->intreq = INTF_LEVEL3;
+}
+
+static void DummyRender() {}
+static BOOL ExitOnLMB() { return !LeftMouseButton(); }
 
 int main() {
-  if ((DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 34))) {
-    if ((GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 34))) {
-      /* Get Vector Base Register */
-      if (SysBase->AttnFlags & AFF_68010)
-        InterruptVector = (APTR)Supervisor((APTR)GetVBR);
+  DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 33);
+  GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 33);
+  MathBase = OpenLibrary("mathffp.library", 33);
 
-      Print("Running on Kickstart %ld.%ld.\n\r",
-            (LONG)SysBase->LibNode.lib_Version,
-            (LONG)SysBase->LibNode.lib_Revision);
+  if (DOSBase && GfxBase && MathBase) {
+    /* Get Vector Base Register */
+    if (SysBase->AttnFlags & AFF_68010)
+      InterruptVector = (APTR)Supervisor((APTR)GetVBR);
 
-      /* Allocate blitter. */
-      WaitBlit();
-      OwnBlitter();
+    Print("Running on Kickstart %ld.%ld.\n",
+          (LONG)SysBase->LibNode.lib_Version,
+          (LONG)SysBase->LibNode.lib_Revision);
+    Print("Largest available chunk of :\n"
+          "(*) chip memory : %7ld bytes\n"
+          "(*) fast memory : %7ld bytes\n",
+          (LONG)AvailMem(MEMF_CHIP | MEMF_LARGEST),
+          (LONG)AvailMem(MEMF_FAST | MEMF_LARGEST));
 
-      Load();
+    if (Effect.Load)
+      Effect.Load();
 
-      {
-        struct View *OldView;
-        UWORD OldDMAcon, OldIntena;
+    /* Allocate blitter. */
+    WaitBlit();
+    OwnBlitter();
 
-        /* No calls to any other library than exec beyond this point or expect
-         * undefined behaviour including crashes. */
-        Forbid();
+    {
+      struct View *OldView;
+      UWORD OldDmacon, OldIntena, OldAdkcon;
 
-        /* Intercept the view of AmigaOS. */
-        OldView = GfxBase->ActiView;
-        LoadView(NULL);
-        WaitTOF();
-        WaitTOF();
+      /* No calls to any other library than exec beyond this point or expect
+       * undefined behaviour including crashes. */
+      Forbid();
 
-        /* DMA & interrupts take-over. */
-        OldDMAcon = custom->dmaconr;
-        OldIntena = custom->intenar;
+      /* Intercept the view of AmigaOS. */
+      OldView = GfxBase->ActiView;
+      LoadView(NULL);
+      WaitTOF();
+      WaitTOF();
 
-        /* Prohibit dma & interrupts. */
-        custom->dmacon = 0x7fff;
-        custom->intena = 0x7fff;
+      /* DMA & interrupts take-over. */
+      OldAdkcon = custom->adkconr;
+      OldDmacon = custom->dmaconr;
+      OldIntena = custom->intenar;
 
-        /* Clear all interrupt requests. Really. */
-        custom->intreq = 0x7fff;
-        custom->intreq = 0x7fff;
+      /* Prohibit dma & interrupts. */
+      custom->dmacon = (UWORD)~DMAF_SETCLR;
+      custom->intena = (UWORD)~INTF_SETCLR;
+      WaitVBlank();
 
-        Main();
+      /* Clear all interrupt requests. Really. */
+      custom->intreq = (UWORD)~INTF_SETCLR;
+      custom->intreq = (UWORD)~INTF_SETCLR;
 
-        /* firstly... disable dma and interrupts that were used in Main */
-        custom->dmacon = 0x7fff;
-        custom->intena = 0x7fff;
+      SaveInterrupts();
 
-        /* Restore AmigaOS state of dma & interrupts. */
-        custom->dmacon = OldDMAcon | DMAF_SETCLR;
-        custom->intena = OldIntena | INTF_SETCLR;
+      /* Enable master switches. */
+      custom->dmacon = DMAF_SETCLR | DMAF_MASTER;
+      custom->intena = INTF_SETCLR | INTF_INTEN;
 
-        /* Restore old copper list... */
-        custom->cop1lc = (ULONG)GfxBase->copinit;
-        /* ... and original view. */
-        LoadView(OldView);
-        WaitTOF();
-        WaitTOF();
+      if (!Effect.Render)
+        Effect.Render = DummyRender;
+      if (!Effect.HandleEvent)
+        Effect.HandleEvent = ExitOnLMB;
 
-        Permit();
+      InterruptVector->IntLevel2 = IntLevel2Handler;
+      InterruptVector->IntLevel3 = IntLevel3Handler;
+
+      if (Effect.Init)
+        Effect.Init();
+
+      if (keyboardActive)
+        custom->intena = INTF_SETCLR | INTF_PORTS;
+      if (mouseActive)
+        custom->intena = INTF_SETCLR | INTF_VERTB;
+
+      lastFrameCount = ReadFrameCounter();
+
+      while (Effect.HandleEvent()) {
+        LONG t = ReadFrameCounter();
+        frameCount = t;
+        Effect.Render();
+        lastFrameCount = t;
       }
 
-      /* Deallocate blitter. */
-      DisownBlitter();
+      custom->intena = INTF_VERTB | INTF_PORTS;
 
-      Kill();
+      if (Effect.Kill)
+        Effect.Kill();
 
-      CloseLibrary((struct Library *)GfxBase);
+      /* firstly... disable dma and interrupts that were used in Main */
+      custom->dmacon = (UWORD)~DMAF_SETCLR;
+      custom->intena = (UWORD)~INTF_SETCLR;
+      WaitVBlank();
+
+      /* Clear all interrupt requests. Really. */
+      custom->intreq = (UWORD)~INTF_SETCLR;
+      custom->intreq = (UWORD)~INTF_SETCLR;
+
+      RestoreInterrupts();
+
+      /* Restore old copper list... */
+      custom->cop1lc = (ULONG)GfxBase->copinit;
+      WaitVBlank();
+
+      /* Restore AmigaOS state of dma & interrupts. */
+      custom->dmacon = OldDmacon | DMAF_SETCLR;
+      custom->intena = OldIntena | INTF_SETCLR;
+      custom->adkcon = OldAdkcon | ADKF_SETCLR;
+
+      /* ... and original view. */
+      LoadView(OldView);
+      WaitTOF();
+      WaitTOF();
+
+      Permit();
     }
 
-    CloseLibrary((struct Library *)DOSBase);
+    /* Deallocate blitter. */
+    DisownBlitter();
+
+    if (Effect.UnLoad)
+      Effect.UnLoad();
   }
+
+  if (MathBase)
+    CloseLibrary(MathBase);
+  if (GfxBase)
+    CloseLibrary((struct Library *)GfxBase);
+  if (DOSBase)
+    CloseLibrary((struct Library *)DOSBase);
 
   return 0;
 }

@@ -1,43 +1,65 @@
+#include "startup.h"
 #include "blitter.h"
 #include "coplist.h"
+#include "line.h"
 
-#define X(x) ((x) + 0x81)
-#define Y(y) ((y) + 0x2c)
+#define WIDTH 320
+#define HEIGHT 256
+#define DEPTH 1
+
+#define CPULINE 0
 
 static BitmapT *screen;
 static CopListT *cp;
 
-void Load() {
-  screen = NewBitmap(320, 256, 1, FALSE);
+static void Load() {
+  screen = NewBitmap(WIDTH, HEIGHT, DEPTH);
   cp = NewCopList(100);
+  CopInit(cp);
+  CopMakePlayfield(cp, NULL, screen, DEPTH);
+  CopMakeDispWin(cp, X(0), Y(0), WIDTH, HEIGHT);
+  CopSetRGB(cp, 0, 0x000);
+  CopSetRGB(cp, 1, 0xfff);
+  CopEnd(cp);
 }
 
-void Kill() {
+static void UnLoad() {
   DeleteCopList(cp);
   DeleteBitmap(screen);
 }
 
-void Main() {
-  CopInit(cp);
-
-  CopMove16(cp, bplcon0, BPLCON0_BPU(screen->depth) | BPLCON0_COLOR);
-  CopMove16(cp, bplcon1, 0);
-  CopMove16(cp, bplcon2, 0);
-  CopMove32(cp, bplpt[0], screen->planes[0]);
-
-  CopMove16(cp, ddfstrt, 0x38);
-  CopMove16(cp, ddfstop, 0xd0);
-  CopMakeDispWin(cp, X(0), Y(0), screen->width, screen->height);
-  CopMove16(cp, color[0], 0x000);
-  CopMove16(cp, color[1], 0xfff);
-
-  CopEnd(cp);
+static void Init() {
   CopListActivate(cp);
+  custom->dmacon = DMAF_SETCLR | DMAF_BLITTER | DMAF_RASTER | DMAF_BLITHOG;
 
-  custom->dmacon = DMAF_SETCLR | DMAF_BLITTER | DMAF_RASTER | DMAF_MASTER;
+  {
+    WORD i;
+    LONG lines = ReadLineCounter();
 
-  BlitterLine(screen, 0, 0, 0, 160, 100);
-  WaitBlitter();
+#if CPULINE == 1
+    CpuLineSetup(screen, 0);
+#else
+    BlitterLineSetup(screen, 0, LINE_OR, LINE_SOLID);
+#endif
 
-  WaitMouse();
+    for (i = 0; i < screen->width; i += 2) {
+#if CPULINE == 1
+      CpuLine(i, 0, screen->width - 1 - i, screen->height - 1);
+#else
+      BlitterLineSync(i, 0, screen->width - 1 - i, screen->height - 1);
+#endif
+    }
+
+    for (i = 0; i < screen->height; i += 2) {
+#if CPULINE == 1
+      CpuLine(0, i, screen->width - 1, screen->height - 1 - i);
+#else
+      BlitterLineSync(0, i, screen->width - 1, screen->height - 1 - i);
+#endif
+    }
+
+    Log("lines: %ld\n", ReadLineCounter() - lines);
+  }
 }
+
+EffectT Effect = { Load, UnLoad, Init, NULL, NULL };

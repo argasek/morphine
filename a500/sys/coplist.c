@@ -1,10 +1,8 @@
-#include <exec/memory.h>
-#include <proto/exec.h>
-
 #include "coplist.h"
+#include "memory.h"
 
 __regargs CopListT *NewCopList(UWORD length) {
-  CopListT *list = AllocMem(sizeof(CopListT) + length * sizeof(CopInsT),
+  CopListT *list = MemAlloc(sizeof(CopListT) + length * sizeof(CopInsT),
                             MEMF_CHIP|MEMF_CLEAR);
 
   list->length = length;
@@ -15,7 +13,7 @@ __regargs CopListT *NewCopList(UWORD length) {
 }
 
 __regargs void DeleteCopList(CopListT *list) {
-  FreeMem(list, sizeof(CopListT) + list->length * sizeof(CopInsT));
+  MemFree(list, sizeof(CopListT) + list->length * sizeof(CopInsT));
 }
 
 __regargs void CopListActivate(CopListT *list) {
@@ -44,8 +42,30 @@ __regargs CopInsT *CopWait(CopListT *list, UWORD vp, UWORD hp) {
   {
     CopInsT *ptr = (CopInsT *)ins;
 
-    *ins++ = (vp << 8) | (hp & 0xff) | 1;
+    *ins++ = (vp << 8) | (hp & 0xfe) | 1;
     *ins++ = 0xfffe;
+
+    list->curr = (CopInsT *)ins;
+
+    return ptr;
+  }
+}
+
+__regargs CopInsT *CopWaitMask(CopListT *list,
+                               UWORD vp, UWORD hp, UWORD vpmask, UWORD hpmask)
+{
+  UWORD *ins = (UWORD *)list->curr;
+
+  if ((vp >= 256) && (!list->flags)) {
+    *((ULONG *)ins)++ = 0xffdffffe;
+    list->flags |= 1;
+  }
+
+  {
+    CopInsT *ptr = (CopInsT *)ins;
+
+    *ins++ = (vp << 8) | (hp & 0xfe) | 1;
+    *ins++ = 0x8000 | ((vpmask << 8) & 0x7f00) | (hpmask & 0xfe);
 
     list->curr = (CopInsT *)ins;
 
@@ -58,10 +78,24 @@ __regargs CopInsT *CopLoadPal(CopListT *list, PaletteT *palette, UWORD start) {
   UWORD *ins = (UWORD *)ptr;
   ColorT *c = palette->colors;
   UWORD i;
+  UWORD n = min(palette->count, 32 - start);
 
-  for (i = 0; i < palette->count; i++, c++) {
+  for (i = 0; i < n; i++, c++) {
     *ins++ = CSREG(color[i + start]);
     *ins++ = ((c->r & 0xf0) << 4) | (c->g & 0xf0) | ((c->b & 0xf0) >> 4);
+  }
+
+  list->curr = (CopInsT *)ins;
+  return ptr;
+}
+
+__regargs CopInsT *CopLoadColor(CopListT *list, UWORD start, UWORD end, UWORD color) {
+  CopInsT *ptr = list->curr;
+  UWORD *ins = (UWORD *)ptr;
+
+  while (start <= end) {
+    *ins++ = CSREG(color[start++]);
+    *ins++ = color;
   }
 
   list->curr = (CopInsT *)ins;

@@ -1,3 +1,4 @@
+#include "startup.h"
 #include "hardware.h"
 #include "coplist.h"
 #include "gfx.h"
@@ -6,48 +7,33 @@
 static BitmapT *bitmap;
 static CopListT *cp;
 
-void Load() {
-  bitmap = LoadILBM("data/test.ilbm", FALSE);
+static void Load() {
+  bitmap = LoadILBMCustom("data/test.ilbm", BM_KEEP_PACKED|BM_LOAD_PALETTE);
   cp = NewCopList(100);
 }
 
-void Kill() {
+static void UnLoad() {
   DeleteCopList(cp);
   DeletePalette(bitmap->palette);
   DeleteBitmap(bitmap);
 }
 
-void Main() {
-  UWORD i;
-
-  CopInit(cp);
-  CopMove16(cp, bplcon0, BPLCON0_BPU(bitmap->depth) | BPLCON0_COLOR);
-  CopMove16(cp, bplcon1, 0);
-  CopMove16(cp, bplcon2, 0);
-  
+static void Init() {
   {
-    UWORD modulo = 0;
-
-    if (bitmap->interleaved)
-      modulo = bitmap->width / 8 * (bitmap->depth - 1);
-
-    CopMove16(cp, bpl1mod, modulo);
-    CopMove16(cp, bpl2mod, modulo);
+    LONG lines = ReadLineCounter();
+    BitmapUnpack(bitmap, BM_DISPLAYABLE);
+    lines = ReadLineCounter() - lines;
+    Log("Bitmap unpacking took %ld raster lines.\n", (LONG)lines);
   }
 
-  CopMove16(cp, ddfstrt, 0x38);
-  CopMove16(cp, ddfstop, 0xd0);
-
-  CopMakeDispWin(cp, 0x81, 0x2c, bitmap->width, bitmap->height);
-
-  for (i = 0; i < bitmap->depth; i++)
-    CopMove32(cp, bplpt[i], bitmap->planes[i]);
-
+  CopInit(cp);
+  CopMakePlayfield(cp, NULL, bitmap, bitmap->depth);
+  CopMakeDispWin(cp, X(0), Y(0), bitmap->width, bitmap->height);
   CopLoadPal(cp, bitmap->palette, 0);
   CopEnd(cp);
+
   CopListActivate(cp);
-
-  custom->dmacon = DMAF_SETCLR | DMAF_RASTER | DMAF_MASTER;
-
-  WaitMouse();
+  custom->dmacon = DMAF_SETCLR | DMAF_RASTER;
 }
+
+EffectT Effect = { Load, UnLoad, Init, NULL, NULL };

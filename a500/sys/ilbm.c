@@ -1,8 +1,11 @@
-#include <exec/memory.h>
-#include <proto/exec.h>
-
-#include "gfx.h"
 #include "iff.h"
+#include "ilbm.h"
+#include "memory.h"
+#include "lzo.h"
+#include "inflate.h"
+
+#define USE_LZO 1
+#define USE_DEFLATE 1
 
 #define ID_ILBM MAKE_ID('I', 'L', 'B', 'M')
 #define ID_BMHD MAKE_ID('B', 'M', 'H', 'D')
@@ -48,72 +51,149 @@ __regargs static void UnRLE(BYTE *data, LONG size, BYTE *uncompressed) {
 }
 
 __regargs static void Deinterleave(BYTE *data, BitmapT *bitmap) { 
-  WORD modulo = bitmap->bytesPerRow * (bitmap->depth - 1);
-  WORD planeNum = bitmap->depth - 1;
+  LONG bytesPerRow = bitmap->bytesPerRow;
+  LONG modulo = (WORD)bytesPerRow * (WORD)(bitmap->depth - 1);
+  WORD bplnum = bitmap->depth;
+  WORD count = bytesPerRow / 2;
+  WORD i = count & 7;
+  WORD k = (count + 7) / 8;
+  APTR *plane = bitmap->planes;
 
   do {
-    BYTE *src = data + bitmap->bytesPerRow * planeNum;
-    BYTE *dst = bitmap->planes[planeNum];
+    BYTE *src = data;
+    BYTE *dst = *plane++;
     WORD rows = bitmap->height;
 
     do {
-      WORD bytes = bitmap->bytesPerRow - 1;
-
-      do { *dst++ = *src++; } while (--bytes != -1);
+      WORD n = k - 1;
+      switch (i) {
+        case 0: do { *((WORD *)dst)++ = *((WORD *)src)++;
+        case 7:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 6:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 5:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 4:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 3:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 2:      *((WORD *)dst)++ = *((WORD *)src)++;
+        case 1:      *((WORD *)dst)++ = *((WORD *)src)++;
+        } while (--n != -1);
+      }
 
       src += modulo;
     } while (--rows);
-  } while (--planeNum >= 0);
+
+    data += bytesPerRow;
+  } while (--bplnum);
 }
 
-__regargs BitmapT *LoadILBM(const char *filename, BOOL interleaved) {
+__regargs void BitmapUnpack(BitmapT *bitmap, UWORD flags) {
+  if (bitmap->compression) {
+    ULONG inLen = (LONG)bitmap->planes[1];
+    APTR inBuf = bitmap->planes[0];
+    ULONG outLen = BitmapSize(bitmap);
+    APTR outBuf = MemAlloc(outLen, MEMF_PUBLIC);
+
+    if (bitmap->compression == COMP_RLE)
+      UnRLE(inBuf, inLen, outBuf);
+#if USE_LZO
+    else if (bitmap->compression == COMP_LZO)
+      lzo1x_decompress(inBuf, inLen, outBuf, &outLen);
+#endif
+#if USE_DEFLATE
+    else if (bitmap->compression == COMP_DEFLATE)
+      Inflate(inBuf, outBuf);
+#endif
+
+    MemFree(inBuf, inLen);
+
+    bitmap->compression = COMP_NONE;
+    BitmapSetPointers(bitmap, outBuf);
+  }
+
+  if ((bitmap->flags & BM_INTERLEAVED) && !(flags & BM_INTERLEAVED)) {
+    ULONG size = BitmapSize(bitmap);
+    APTR inBuf = bitmap->planes[0];
+    APTR outBuf = MemAlloc(size, MEMF_PUBLIC);
+
+    bitmap->flags &= ~BM_INTERLEAVED;
+    BitmapSetPointers(bitmap, outBuf);
+
+    Deinterleave(inBuf, bitmap);
+    MemFree(inBuf, size);
+  }
+
+  if (flags & BM_DISPLAYABLE)
+    BitmapMakeDisplayable(bitmap);
+}
+
+__regargs BitmapT *LoadILBMCustom(const char *filename, UWORD flags) {
   BitmapT *bitmap = NULL;
   PaletteT *palette = NULL;
   IffFileT iff;
 
   if (OpenIff(&iff, filename)) {
     if (iff.header.type == ID_ILBM) {
-      BOOL compression = FALSE;
-
       while (ParseChunk(&iff)) {
         BitmapHeaderT bmhd;
 
         switch (iff.chunk.type) {
           case ID_BMHD:
             ReadChunk(&iff, &bmhd);
-            bitmap = NewBitmap(bmhd.w, bmhd.h, bmhd.nPlanes, interleaved);
-            compression = bmhd.compression;
+            if (flags & BM_KEEP_PACKED) {
+              bitmap = NewBitmapCustom(bmhd.w, bmhd.h, bmhd.nPlanes,
+                                       BM_MINIMAL|BM_INTERLEAVED);
+              bitmap->compression = bmhd.compression;
+            } else {
+              bitmap = NewBitmapCustom(bmhd.w, bmhd.h, bmhd.nPlanes, flags);
+            }
             break;
 
           case ID_CMAP:
-            palette = NewPalette(iff.chunk.length / sizeof(ColorT));
-            ReadChunk(&iff, palette->colors);
+            if (flags & BM_LOAD_PALETTE) {
+              palette = NewPalette(iff.chunk.length / sizeof(ColorT));
+              ReadChunk(&iff, palette->colors);
+            } else {
+              SkipChunk(&iff);
+            }
             break;
         
           case ID_BODY:
             {
-              BYTE *data = AllocMem(iff.chunk.length, MEMF_PUBLIC);
+              BYTE *data = MemAlloc(iff.chunk.length, MEMF_PUBLIC);
               LONG size = iff.chunk.length;
-
               ReadChunk(&iff, data);
 
-              if (compression) {
-                LONG newSize = bitmap->bplSize * bitmap->depth;
-                BYTE *uncompressed = AllocMem(newSize, MEMF_PUBLIC);
+              if (flags & BM_KEEP_PACKED) {
+                bitmap->planes[0] = data;
+                bitmap->planes[1] = (APTR)size;
+                bitmap->flags &= ~BM_MINIMAL;
+              } else {
+                if (bmhd.compression) {
+                  ULONG newSize = bitmap->bplSize * bitmap->depth;
+                  BYTE *uncompressed = MemAlloc(newSize, MEMF_PUBLIC);
 
-                UnRLE(data, size, uncompressed);
-                FreeMem(data, size);
+                  if (bmhd.compression == COMP_RLE)
+                    UnRLE(data, size, uncompressed);
+#if USE_LZO
+                  if (bmhd.compression == COMP_LZO)
+                    lzo1x_decompress(data, size, uncompressed, &newSize);
+#endif
+#if USE_DEFLATE
+                  if (bmhd.compression == COMP_DEFLATE)
+                    Inflate(data, uncompressed);
+#endif
+                  MemFree(data, size);
 
-                data = uncompressed;
-                size = newSize;
+                  data = uncompressed;
+                  size = newSize;
+                }
+
+                if (flags & BM_INTERLEAVED)
+                  memcpy(bitmap->planes[0], data, bitmap->bplSize * bitmap->depth);
+                else
+                  Deinterleave(data, bitmap);
+
+                MemFree(data, size);
               }
-
-              if (!interleaved)
-                Deinterleave(data, bitmap);
-              else
-                CopyMem(data, bitmap->planes[0], bitmap->bplSize * bitmap->depth);
-
-              FreeMem(data, size);
             }
             break;
 
@@ -128,7 +208,35 @@ __regargs BitmapT *LoadILBM(const char *filename, BOOL interleaved) {
     }
 
     CloseIff(&iff);
+  } else {
+    Log("File '%s' missing.\n", filename);
   }
 
   return bitmap;
+}
+
+__regargs PaletteT *LoadPalette(const char *filename) {
+  PaletteT *palette = NULL;
+  IffFileT iff;
+
+  if (OpenIff(&iff, filename)) {
+    if (iff.header.type == ID_ILBM) {
+      while (ParseChunk(&iff)) {
+        switch (iff.chunk.type) {
+          case ID_CMAP:
+            palette = NewPalette(iff.chunk.length / sizeof(ColorT));
+            ReadChunk(&iff, palette->colors);
+            break;
+
+          default:
+            SkipChunk(&iff);
+            break;
+        }
+      }
+    }
+
+    CloseIff(&iff);
+  }
+
+  return palette;
 }

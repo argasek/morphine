@@ -1,276 +1,131 @@
+#include "startup.h"
 #include "blitter.h"
 #include "coplist.h"
-#include "file.h"
-#include "memory.h"
-#include "print.h"
 #include "3d.h"
+#include "fx.h"
 
-#define X(x) ((x) + 0x81)
-#define Y(y) ((y) + 0x2c)
+#define WIDTH  320
+#define HEIGHT 256
+#define DEPTH  1
 
-static Object3D object;
-static View3D view3d;
+static Object3D *cube;
 
-static BitmapT *screen;
 static CopListT *cp;
+static CopInsT *bplptr[DEPTH];
+static BitmapT *screen[2];
+static UWORD active = 0;
 
-void Load() {
-  screen = NewBitmap(320, 256, 1, FALSE);
+static void Load() {
+  screen[0] = NewBitmap(WIDTH, HEIGHT, DEPTH);
+  screen[1] = NewBitmap(WIDTH, HEIGHT, DEPTH);
+  cube = LoadObject3D("data/cube.3d");
   cp = NewCopList(100);
-
-  {
-    static VertexT vertex[8] = {
-      { -100, -100, -100 },
-      {  100, -100, -100 },
-      {  100,  100, -100 },
-      { -100,  100, -100 },
-      { -100, -100,  100 },
-      {  100, -100,  100 },
-      {  100,  100,  100 },
-      { -100,  100,  100 }
-    };
-
-    static EdgeT edge[12] = {
-      { 0, 1 },
-      { 1, 2 },
-      { 2, 3 },
-      { 3, 0 },
-      { 4, 5 },
-      { 5, 6 },
-      { 6, 7 },
-      { 7, 4 },
-      { 0, 4 },
-      { 1, 5 },
-      { 2, 6 },
-      { 3, 7 }
-    };
-
-    static PointT point[8];
-    static UBYTE pointFlags[8];
-    static LineT line[12];
-    static UBYTE lineFlags[12];
-
-    object.nVertex = 8;
-    object.nEdge = 12;
-    object.vertex = vertex;
-    object.edge = edge;
-    object.point = point;
-    object.pointFlags = pointFlags;
-    object.line = line;
-    object.lineFlags = lineFlags;
-  }
 }
 
-void Kill() {
+static void UnLoad() {
+  DeleteObject3D(cube);
+  DeleteBitmap(screen[0]);
+  DeleteBitmap(screen[1]);
   DeleteCopList(cp);
-  DeleteBitmap(screen);
 }
 
-#if 0
-static WORD lines[256];
-static WORD pixel[8] = { 128, 64, 32, 16, 8, 4, 2, 1 };
-
-static void CalculateLines() {
-  WORD i, j;
-  WORD l = screen->width / 8;
-
-  for (i = 0, j = 0; i < 256; i++, j += l)
-    lines[i] = j;
-}
-
-static void ClearPoints() {
-  UBYTE *plane = screen->planes[0];
-  WORD *coords = (WORD *)point[buffer ^ 1];
-  WORD i;
-
-  for (i = 0; i < 8; i++) {
-    WORD x = *coords++;
-    WORD y = *coords++;
-
-    if (x < 0 || y < 0 || x >= 320 || y >= 256)
-     continue;
-
-    plane[lines[y] + (x >> 3)] = 0;
-  }
-}
-
-static void DrawPoints() {
-  UBYTE *plane = screen->planes[0];
-  WORD *coords = (WORD *)point[buffer];
-  WORD i;
-
-  for (i = 0; i < 8; i++) {
-    WORD x = *coords++;
-    WORD y = *coords++;
-
-    if (x < 0 || y < 0 || x >= 320 || y >= 256)
-     continue;
-
-    plane[lines[y] + (x >> 3)] |= pixel[x & 7];
-  }
-}
-#endif
-
-typedef struct {
-  WORD p, q;
-} LBEdgeT;
-
-static inline WORD div16(LONG a, WORD b) {
-  asm("divs %1,%0"
-      : "+d" (a)
-      : "d" (b));
-  return a;
-}
-
-static BOOL LiangBarsky(LineT *line) {
-  static LBEdgeT edge[4];
-
-  WORD t0 = 0;
-  WORD t1 = 0x1000;
-  WORD xdelta = line->x2 - line->x1;
-  WORD ydelta = line->y2 - line->y1;
-  WORD i;
-
-  edge[0].p = -xdelta;
-  edge[0].q = line->x1;
-  edge[1].p = xdelta;
-  edge[1].q = 319 - line->x1;
-  edge[2].p = -ydelta;
-  edge[2].q = line->y1;
-  edge[3].p = ydelta;
-  edge[3].q = 255 - line->y1;
-
-  for (i = 0; i < 4; i++) {
-    WORD p, r;
-   
-    p = edge[i].p;
-
-    if (p == 0) {
-      i++;
-      continue;
-    }
-
-    r = div16(edge[i].q * 0x1000, p);
-
-    if (p < 0) {
-      if (r > t1)
-        return FALSE;
-
-      if (r > t0)
-        t0 = r;
-    } else {
-      if (r < t0)
-        return FALSE;
-
-      if (r < t1)
-        t1 = r;
-    }
-  }
-
-  if (t0 > 0) {
-    line->x1 += (t0 * xdelta + 0x800) / 0x1000;
-    line->y1 += (t0 * ydelta + 0x800) / 0x1000;
-  }
-
-  if (t1 < 0x1000) {
-    t1 -= 0x1000;
-    line->x2 += (t1 * xdelta + 0x800) / 0x1000;
-    line->y2 += (t1 * ydelta + 0x800) / 0x1000;
-  }
-
-  return TRUE;
-}
-
-void ClipEdges(Object3D *object) {
-  WORD n = object->nEdge;
-  PointT *point = object->point;
-  UBYTE *pointFlags = object->pointFlags;
-  EdgeT *edge = object->edge;
-  LineT *line = object->line;
-  UBYTE *lineFlags = object->lineFlags;
-
-  do {
-    UWORD i1 = edge->p1;
-    UWORD i2 = edge->p2;
-    BOOL outside = pointFlags[i1] & pointFlags[i2];
-    BOOL clip = pointFlags[i1] | pointFlags[i2];
-
-    line->x1 = point[i1].x;
-    line->y1 = point[i1].y;
-    line->x2 = point[i2].x;
-    line->y2 = point[i2].y;
-
-    if (!outside && clip)
-      outside = !LiangBarsky(line);
-
-    edge++;
-    line++;
-    *lineFlags++ = outside;
-  } while (--n);
-}
-
-static void DrawObject() {
-  LineT *line = object.line;
-  UBYTE *lineFlags = object.lineFlags;
-  WORD n = object.nEdge;
-
-  do {
-    WaitBlitter();
-    if (!*lineFlags++)
-      BlitterLine(screen, 0, line->x1, line->y1, line->x2, line->y2);
-    line++;
-  } while (--n);
-}
-
-void Main() {
+static void MakeCopperList(CopListT *cp) {
   CopInit(cp);
-
-  CopMove16(cp, bplcon0, BPLCON0_BPU(screen->depth) | BPLCON0_COLOR);
-  CopMove16(cp, bplcon1, 0);
-  CopMove16(cp, bplcon2, 0);
-  CopMove32(cp, bplpt[0], screen->planes[0]);
-
-  CopMove16(cp, ddfstrt, 0x38);
-  CopMove16(cp, ddfstop, 0xd0);
-  CopMakeDispWin(cp, X(0), Y(0), screen->width, screen->height);
-  CopMove16(cp, color[0], 0x000);
-  CopMove16(cp, color[1], 0xfff);
-
+  CopMakeDispWin(cp, X(0), Y(0), WIDTH, HEIGHT);
+  CopMakePlayfield(cp, bplptr, screen[active], DEPTH);
+  CopSetRGB(cp, 0, 0x000);
+  CopSetRGB(cp, 1, 0xfff);
   CopEnd(cp);
+}
+
+static void Init() {
+  MakeCopperList(cp);
   CopListActivate(cp);
+  custom->dmacon = DMAF_SETCLR | DMAF_BLITTER | DMAF_RASTER;
 
-  custom->dmacon = DMAF_SETCLR | DMAF_BLITTER | DMAF_RASTER | DMAF_MASTER;
+  ClipFrustum.near = fx4i(-100);
+  ClipFrustum.far = fx4i(-400);
+}
 
-  view3d.viewerX = 100;
-  view3d.viewerY = 100;
-  view3d.viewerZ = 300;
+static Point3D tmpPoint[2][16];
 
-  while (!LeftMouseButton()) {
-    view3d.rotateX++;
-    view3d.rotateY++;
-    view3d.rotateZ++;
+static void DrawObject(Object3D *object) {
+  Point3D *point = object->cameraPoint;
+  PolygonT *polygon = object->polygon;
+  UBYTE *flags = object->cameraPointFlags;
+  UWORD *vertex = object->polygonVertex;
+  WORD polygons = object->polygons;
+  Point3D *normal = object->polygonNormal;
 
-    WaitLine(Y(0));
+  for (; polygons--; normal++, polygon++) {
+    WORD i, n = polygon->vertices;
+    UBYTE clipFlags = 0;
+    UBYTE outside = 0xff;
+    Point3D *in = tmpPoint[0];
+    Point3D *out = tmpPoint[1];
 
-    custom->color[0] = 0x00f;
-    CalculateView3D(&view3d);
-    TransformVertices(&view3d, &object);
-    ClipEdges(&object);
-    custom->color[0] = 0x000;
+    /* Check polygon visibility. */
+    {
+      Point3D *p = &point[vertex[polygon->index]];
 
-    WaitLine(Y(200));
+      if (normal->x * p->x + normal->y * p->y + normal->z * p->z >= 0)
+        continue;
+    }
 
-    custom->color[0] = 0xf00;
+    for (i = 0; i < n; i++) {
+      UWORD k = vertex[polygon->index + i];
 
-    WaitBlitter();
-    BlitterClear(screen, 0);
+      clipFlags |= flags[k];
+      outside &= flags[k];
+      in[i] = point[k];
+      out[i] = point[k];
+    }
 
-    custom->color[0] = 0x0f0;
-    DrawObject();
-    custom->color[0] = 0x000;
+    if (outside)
+      continue;
 
+    n = ClipPolygon3D(in, &out, n, clipFlags);
+
+    /* Perspective mapping. */
+    for (i = 0; i < n; i++) {
+      out[i].x = div16(256 * out[i].x, out[i].z) + 160;
+      out[i].y = div16(256 * out[i].y, out[i].z) + 128;
+    }
+
+    BlitterLineSetup(screen[active], 0, LINE_OR, LINE_SOLID);
+
+    while (--n > 0) {
 #if 0
-    WaitVBlank();
+      Log ("(%ld %ld %ld) - (%ld %ld %ld)\n",
+           (LONG)out[0].x, (LONG)out[0].y, (LONG)out[0].z,
+           (LONG)out[1].x, (LONG)out[1].y, (LONG)out[1].z);
 #endif
+
+      BlitterLine(out[0].x, out[0].y, out[1].x, out[1].y);
+      WaitBlitter();
+      out++;
+    }
   }
 }
+
+static void Render() {
+  LONG a = ReadFrameCounter() * 4;
+  Matrix3D t;
+
+  BlitterClear(screen[active], 0);
+  WaitBlitter();
+
+  LoadRotate3D(&t, a, a, a);
+  Translate3D(&t, 0, 0, fx4i(-250));
+  Transform3D(&t, cube->cameraPoint, cube->point, cube->points);
+  PointsInsideFrustum(cube->cameraPoint, cube->cameraPointFlags, cube->points);
+  UpdatePolygonNormals(cube);
+
+  DrawObject(cube);
+
+  WaitVBlank();
+  ITER(i, 0, DEPTH - 1, CopInsSet32(bplptr[i], screen[active]->planes[i]));
+  active ^= 1;
+}
+
+EffectT Effect = { Load, UnLoad, Init, NULL, Render };

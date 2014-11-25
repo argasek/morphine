@@ -6,6 +6,6 @@ all:
 clean:
 	@rm -vrf build
 	@rm -vf $(OBJ).{html,c,o,so}
-	@rm -vf *~
+	@rm -vf *.pyc *~
 
 .PHONY: all

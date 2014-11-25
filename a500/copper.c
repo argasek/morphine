@@ -1,54 +1,126 @@
+#include "startup.h"
 #include "hardware.h"
 #include "coplist.h"
-#include "interrupts.h"
+#include "random.h"
+
+#define LINES 8
+#define NEXT ((LINES * 2 + 3) * sizeof(CopInsT))
 
 static CopListT *cp = NULL;
+static UBYTE *linePos[LINES];
+static UWORD *lineColor[LINES];
+static UWORD colors[LINES][LINES];
 
-void Load() {
-  cp = NewCopList(100);
+static void MakeCopperList(CopListT *cp) {
+  CopInsT *ins;
+  WORD i, j;
+
+  CopInit(cp);
+  CopSetRGB(cp, 0, 0);
+
+  for (i = 0; i < 256; i++) {
+    CopWait(cp, Y(i), 8);
+    CopSetRGB(cp, 0, 0);
+    if (Y(i) != 256)
+      CopSetRGB(cp, 0, 0);
+    for (j = 0; j < LINES; j++) {
+      ins = CopWait(cp, Y(i), 8);
+      if (i == 0)
+        linePos[j] = ((UBYTE*)ins) + 1;
+      ins = CopSetRGB(cp, 0, 0);
+      if (i == 0)
+        lineColor[j] = ((UWORD*)ins) + 1;
+    }
+  }
+
+  CopWait(cp, Y(256), 8);
+  CopSetRGB(cp, 0, 0);
+  CopEnd(cp);
 }
 
-void Kill() {
+static void MakeTileColors() {
+  WORD i, j;
+
+  for (i = 0; i < LINES; i++) 
+    for (j = 0; j < LINES; j++) 
+      colors[i][j] = random() & 0xfff;
+}
+
+static void Load() {
+  cp = NewCopList(256 * (LINES * 2 + 3) + 100);
+  MakeCopperList(cp);
+
+  MakeTileColors();
+}
+
+static void UnLoad() {
   DeleteCopList(cp);
 }
 
-static CopInsT *upperColor = NULL;
+static void CopperLine(UBYTE *lineptr, WORD x1, WORD y1, WORD x2, WORD y2) {
+  x1 = X(x1) >> 1;
+  x2 = X(x2) >> 1;
 
-__interrupt_handler void IntLevel3Handler() {
-  static ULONG frameNumber = 0;
+  lineptr += y1;
 
-  if (custom->intreqr & INTF_VERTB) {
-    frameNumber++;
+  {
+    WORD dy = y2 - y1;
+    WORD dx = x2 - x1;
+    LONG z = x1 << 16;
+    /* This is a long division! Precalculate if possible... */
+    LONG dz = (dx << 16) / dy;
+    register UBYTE one asm("d7") = 1;
 
-    if (upperColor)
-      CopInsSet16(upperColor, ((frameNumber & 63) < 32) ? 0x00f : 0x0f0);
+    while (--dy >= 0) {
+      UWORD x = swap16(z);
+      *lineptr = x | one;
+      lineptr += NEXT;
+      z += dz;
+    }
+  }
+}
+
+static void SetLinesColor() {
+  WORD i, j, k;
+
+  for (i = 0; i < LINES; i++) {
+    UWORD *lineptr = lineColor[i];
+    UWORD *colptr = colors[i];
+    
+    j = 8;
+    while (--j >= 0) {
+      UWORD c = *colptr++;
+      k = 32 / 4;
+      while (--k >= 0) {
+        *lineptr = c;
+        lineptr += NEXT / sizeof(UWORD);
+        *lineptr = c;
+        lineptr += NEXT / sizeof(UWORD);
+        *lineptr = c;
+        lineptr += NEXT / sizeof(UWORD);
+        *lineptr = c;
+        lineptr += NEXT / sizeof(UWORD);
+      }
+    }
+  }
+}
+
+static void Init() {
+  CopListActivate(cp);
+}
+
+static void Render() {
+  {
+    LONG lc = ReadLineCounter();
+    ITER(i, 0, LINES - 1, CopperLine(linePos[i], 0 + i * 32, 0, 24 + i * 32, 256));
+    Log("lines: %ld\n", ReadLineCounter() - lc);
   }
 
-  /*
-   * Clear interrupt flags for this level to avoid infinite re-entering
-   * interrupt handler.
-   */
-  custom->intreq = INTF_LEVEL3;
+  {
+    LONG lc = ReadLineCounter();
+    SetLinesColor();
+    Log("colors: %ld\n", ReadLineCounter() - lc);
+  }
 }
 
-void Main() {
-  APTR OldIntLevel3;
-
-  /* Hardware initialization. */
-  OldIntLevel3 = InterruptVector->IntLevel3;
-  InterruptVector->IntLevel3 = IntLevel3Handler;
-  custom->intena = INTF_SETCLR | INTF_LEVEL3 | INTF_INTEN;
-
-  CopInit(cp);
-  upperColor = CopMove16(cp, color[0], 0xfff);
-  CopWait(cp, 312/2, 0);
-  CopMove16(cp, color[0], 0xf00);
-  CopEnd(cp);
-  CopListActivate(cp);
-
-  WaitMouse();
-
-  /* Hardware release. */
-  custom->intena = INTF_LEVEL3;
-  InterruptVector->IntLevel3 = OldIntLevel3;
-}
+EffectT Effect = { Load, UnLoad, Init, NULL, Render };
