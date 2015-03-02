@@ -1,239 +1,228 @@
 #include "startup.h"
-#include "blitter.h"
+#include "bltop.h"
 #include "coplist.h"
 #include "3d.h"
 #include "fx.h"
-#include "iff.h"
 #include "ffp.h"
 #include "memory.h"
+#include "ilbm.h"
 
-#define WIDTH  320
+#define WIDTH  256
 #define HEIGHT 256
-#define DEPTH 1
+#define DEPTH 4
 
+static Mesh3D *mesh;
 static Object3D *cube;
-
 static CopListT *cp;
-static BitmapT *screen[2];
+static PaletteT *palette;
+static BitmapT *screen;
 static UWORD active = 0;
 static CopInsT *bplptr[DEPTH];
 
-#define ID_LWOB MAKE_ID('L', 'W', 'O', 'B')
-#define ID_LWO2 MAKE_ID('L', 'W', 'O', '2')
-#define ID_PNTS MAKE_ID('P', 'N', 'T', 'S')
-#define ID_POLS MAKE_ID('P', 'O', 'L', 'S')
-
-static __regargs Object3D *LoadLWO(char *filename, FLOAT scale) {
-  Object3D *obj = NULL;
-  IffFileT iff;
-
-  if (OpenIff(&iff, filename)) {
-    if (iff.header.type == ID_LWOB || iff.header.type == ID_LWO2) {
-      FLOAT *pnts = NULL;
-      WORD *pols = NULL;
-      LONG pntsLength = 0;
-      LONG polsLength = 0;
-
-      while (ParseChunk(&iff)) {
-        switch (iff.chunk.type) {
-          case ID_PNTS:
-            pntsLength = iff.chunk.length;
-            pnts = MemAlloc(pntsLength, MEMF_PUBLIC);
-            ReadChunk(&iff, pnts);
-            break;
-
-          case ID_POLS:
-            polsLength = iff.chunk.length;
-            pols = MemAlloc(polsLength, MEMF_PUBLIC);
-            ReadChunk(&iff, pols);
-            break;
-
-          default:
-            SkipChunk(&iff);
-            break;
-        }
-      }
-
-      {
-        UWORD points = pntsLength / 12;
-        UWORD polygons = 0;
-        UWORD polygonVertices = 0;
-
-        LONG i = 0;
-        LONG n = polsLength / 2;
-
-        if (iff.header.type == ID_LWOB) {
-          while (i < n) {
-            WORD vertices = pols[i++];
-            polygonVertices += vertices;
-            polygons++;
-            i += vertices + 1;
-          }
-        } else {
-          i += 2;
-          while (i < n) {
-            WORD vertices = pols[i++];
-            polygonVertices += vertices;
-            polygons++;
-            i += vertices;
-          }
-        }
-
-        obj = NewObject3D(points, polygons);
-
-        Log("File '%s' has %ld points and %ld polygons.\n", 
-            filename, (LONG)points, (LONG)polygons);
-
-        /* Process points. */
-        {
-          FLOAT s = SPMul(scale, SPFlt(16));
-
-          for (i = 0; i < points; i++) {
-            obj->point[i].x = SPFix(SPMul(SPFieee(pnts[i * 3 + 0]), s));
-            obj->point[i].y = SPFix(SPMul(SPFieee(pnts[i * 3 + 1]), s));
-            obj->point[i].z = SPFix(SPMul(SPFieee(pnts[i * 3 + 2]), s));
-          }
-
-          MemFree(pnts, pntsLength);
-        }
-
-        /* Process polygons. */
-        {
-          WORD *polygonVertex = MemAlloc(sizeof(UWORD) * polygonVertices,
-                                         MEMF_PUBLIC);
-          WORD p = 0, j = 0;
-
-          i = 0;
-          n = polsLength / 2;
-
-          if (iff.header.type == ID_LWOB) {
-            while (i < n) {
-              WORD vertices = pols[i++];
-              obj->polygon[p].vertices = vertices;
-              obj->polygon[p].index = j;
-              while (--vertices >= 0)
-                polygonVertex[j++] = pols[i++];
-              i++;
-              p++;
-            }
-          } else {
-            i += 2;
-            while (i < n) {
-              WORD vertices = pols[i++];
-              obj->polygon[p].vertices = vertices;
-              obj->polygon[p].index = j;
-              while (--vertices >= 0)
-                polygonVertex[j++] = pols[i++];
-              p++;
-            }
-          }
-
-          obj->polygonVertices = polygonVertices;
-          obj->polygonVertex = polygonVertex;
-
-          MemFree(pols, polsLength);
-        }
-      }
-    }
-
-    CloseIff(&iff);
-  }
-
-  return obj;
-}
-
 static void Load() {
-  screen[0] = NewBitmap(WIDTH, HEIGHT, 1);
-  screen[1] = NewBitmap(WIDTH, HEIGHT, 1);
-  cp = NewCopList(80);
-  cube = LoadLWO("data/new_2.lwo", SPFlt(80));
-
-  CalculateEdges(cube);
+  palette = LoadPalette("data/showlwo-pal.ilbm");
+  // mesh = LoadLWO("data/new_2.lwo", SPFlt(80));
+  mesh = LoadLWO("data/codi.lwo", SPFlt(256));
+  CalculateEdges(mesh);
 }
 
 static void UnLoad() {
-  DeleteObject3D(cube);
-  DeleteCopList(cp);
-  DeleteBitmap(screen[0]);
-  DeleteBitmap(screen[1]);
+  DeletePalette(palette);
+  DeleteMesh3D(mesh);
 }
 
 static void MakeCopperList(CopListT *cp) {
   CopInit(cp);
-  CopMakePlayfield(cp, bplptr, screen[active], DEPTH);
-  CopMakeDispWin(cp, X(0), Y(0), WIDTH, HEIGHT);
-  CopSetRGB(cp, 0, 0x000);
-  CopSetRGB(cp, 1, 0xfff);
+  CopMakePlayfield(cp, bplptr, screen, DEPTH);
+  CopMakeDispWin(cp, X(32), Y(0), WIDTH, HEIGHT);
+  CopLoadPal(cp, palette, 0);
   CopEnd(cp);
 }
 
 static void Init() {
+  cube = NewObject3D(mesh);
+
+  screen = NewBitmap(WIDTH, HEIGHT, DEPTH + 1);
+
+  cp = NewCopList(80);
   MakeCopperList(cp);
   CopListActivate(cp);
   custom->dmacon = DMAF_SETCLR | DMAF_BLITTER | DMAF_RASTER;
 }
 
-__regargs static void CalculatePerspective(Point3D *p, WORD points) {
-  WORD *src = (WORD *)p;
-  WORD *dst = (WORD *)p;
-  WORD n = points;
+static void Kill() {
+  DeleteCopList(cp);
+  DeleteBitmap(screen);
+  DeleteObject3D(cube);
+}
 
-  while (--n >= 0) {
+#define MULVERTEX1(D, E) {               \
+  WORD t0 = (*v++) + y;                  \
+  WORD t1 = (*v++) + x;                  \
+  LONG t2 = (*v++) * z;                  \
+  v++;                                   \
+  D = ((t0 * t1 + t2 - x * y) >> 4) + E; \
+}
+
+#define MULVERTEX2(D) {                  \
+  WORD t0 = (*v++) + y;                  \
+  WORD t1 = (*v++) + x;                  \
+  LONG t2 = (*v++) * z;                  \
+  WORD t3 = (*v++);                      \
+  D = normfx(t0 * t1 + t2 - x * y) + t3; \
+}
+
+static __regargs void CustomTransform3D(Object3D *object) {
+  Matrix3D *M = &object->world;
+  WORD *src = (WORD *)object->mesh->vertex;
+  WORD *dst = (WORD *)object->point;
+  WORD n = object->mesh->vertices;
+  LONG m0, m1;
+
+  M->x -= normfx(M->m00 * M->m01);
+  M->y -= normfx(M->m10 * M->m11);
+  M->z -= normfx(M->m20 * M->m21);
+
+  m0 = M->x << 8;
+  m1 = M->y << 8;
+
+  /*
+   * A = m00 * m01
+   * B = m10 * m11
+   * C = m20 * m21 
+   * yx = y * x
+   *
+   * (m00 + y) * (m01 + x) + m02 * z - yx + (mx - A)
+   * (m10 + y) * (m11 + x) + m12 * z - yx + (my - B)
+   * (m20 + y) * (m21 + x) + m22 * z - yx + (mz - C)
+   */
+
+  do {
+    WORD *v = (WORD *)M;
     WORD x = *src++;
     WORD y = *src++;
     WORD z = *src++;
+    LONG xp, yp;
+    WORD zp;
 
-    *dst++ = div16(256 * x, z) + WIDTH / 2;
-    *dst++ = div16(256 * y, z) + HEIGHT / 2;
-    dst++;
-  }
+    MULVERTEX1(xp, m0);
+    MULVERTEX1(yp, m1);
+    MULVERTEX2(zp);
+
+    *dst++ = div16(xp, zp) + WIDTH / 2;  /* div(xp * 256, zp) */
+    *dst++ = div16(yp, zp) + HEIGHT / 2; /* div(yp * 256, zp) */
+  } while (--n > 0);
 }
 
 __regargs static void DrawObject(Object3D *object) {
-  Point3D *point = object->cameraPoint;
-  UWORD *edge = (UWORD *)object->edge;
-  WORD edges = object->edges;
+  Point2D *point = object->point;
+  WORD *edge = (WORD *)object->mesh->edge;
+  WORD edges = object->mesh->edges;
+  APTR start = screen->planes[active];
 
-  BlitterLineSetup(screen[active], 0, LINE_OR, LINE_SOLID);
+  custom->bltafwm = -1;
+  custom->bltalwm = -1;
+  custom->bltadat = 0x8000;
+  custom->bltbdat = 0xffff; /* Line texture pattern. */
+  custom->bltcmod = WIDTH / 8;
+  custom->bltdmod = WIDTH / 8;
 
   while (--edges >= 0) {
-    Point3D *p0 = (APTR)point + (ULONG)*edge++;
-    Point3D *p1 = (APTR)point + (ULONG)*edge++;
-    BlitterLineSync(p0->x, p0->y, p1->x, p1->y);
+    WORD *p0 = (APTR)point + *edge++;
+    WORD *p1 = (APTR)point + *edge++;
+    WORD x0 = *p0++, y0 = *p0++;
+    WORD x1 = *p1++, y1 = *p1++;
+
+    if (y0 > y1) {
+      swapr(x0, x1);
+      swapr(y0, y1);
+    }
+
+    {
+      APTR data = start + (((y0 << 5) + (x0 >> 3)) & ~1);
+      WORD dmax = x1 - x0;
+      WORD dmin = y1 - y0;
+      WORD derr;
+      UWORD bltcon1 = LINE_SOLID;
+
+      if (dmax < 0)
+        dmax = -dmax;
+
+      if (dmax >= dmin) {
+        if (x0 >= x1)
+          bltcon1 |= (AUL | SUD);
+        else
+          bltcon1 |= SUD;
+      } else {
+        if (x0 >= x1)
+          bltcon1 |= SUL;
+        swapr(dmax, dmin);
+      }
+
+      derr = 2 * dmin - dmax;
+      if (derr < 0)
+        bltcon1 |= SIGNFLAG;
+      bltcon1 |= rorw(x0 & 15, 4);
+
+      {
+        UWORD bltcon0 = rorw(x0 & 15, 4) | LINE_OR;
+        UWORD bltamod = derr - dmax;
+        UWORD bltbmod = 2 * dmin;
+        UWORD bltsize = (dmax << 6) + 66;
+        APTR bltapt = (APTR)(LONG)derr;
+
+        WaitBlitter();
+
+        custom->bltcon0 = bltcon0;
+        custom->bltcon1 = bltcon1;
+        custom->bltamod = bltamod;
+        custom->bltbmod = bltbmod;
+        custom->bltapt = bltapt;
+        custom->bltcpt = data;
+        custom->bltdpt = data;
+        custom->bltsize = bltsize;
+      }
+    }
   }
 }
 
 static Point3D rotate = { 0, 0, 0 };
 
 static void Render() {
-  Matrix3D t;
-
   rotate.x += 16;
   rotate.y += 16;
   rotate.z += 16;
 
-  {
-    LONG lines = ReadLineCounter();
-    LoadRotate3D(&t, rotate.x, rotate.y, rotate.z);
-    Translate3D(&t, 0, 0, fx4i(-250));
-    Transform3D(&t, cube->cameraPoint, cube->point, cube->points);
+  BlitterClearSync(screen, active);
 
-    CalculatePerspective(cube->cameraPoint, cube->points);
-    Log("transform: %ld\n", ReadLineCounter() - lines);
+  {
+    // LONG lines = ReadLineCounter();
+    LoadRotate3D(&cube->world, rotate.x, rotate.y, rotate.z);
+    Translate3D(&cube->world, 0, 0, fx4i(-250));
+    CustomTransform3D(cube);
+    // Log("transform: %ld\n", ReadLineCounter() - lines);
   }
 
-  BlitterClear(screen[active], 0);
-  WaitBlitter();
-
   {
-    LONG lines = ReadLineCounter();
+    // LONG lines = ReadLineCounter();
     DrawObject(cube);
-    Log("draw: %ld\n", ReadLineCounter() - lines);
+    // Log("draw: %ld\n", ReadLineCounter() - lines);
   }
 
   WaitVBlank();
-  ITER(i, 0, DEPTH - 1, CopInsSet32(bplptr[i], screen[active]->planes[i]));
-  active ^= 1;
+
+  {
+    WORD n = DEPTH;
+
+    while (--n >= 0) {
+      WORD i = (active + n + 1 - DEPTH) % 5;
+      if (i < 0)
+        i += DEPTH + 1;
+      CopInsSet32(bplptr[n], screen->planes[i]);
+    }
+  }
+
+  active = (active + 1) % 5;
 }
 
-EffectT Effect = { Load, UnLoad, Init, NULL, Render };
+EffectT Effect = { Load, UnLoad, Init, Kill, Render };

@@ -1,4 +1,4 @@
-Amiga 500 Hardware Programming Examples
+Amiga 500
 ===
 
 ### Documentation
@@ -10,6 +10,8 @@ Amiga 500 Hardware Programming Examples
 3. [Custom Register Index](http://www.winnicki.net/amiga/memmap/)
 
 4. [MOTOROLA M68000 FAMILY Programmer's Reference Manual](http://www.freescale.com/files/archives/doc/ref_manual/M68000PRM.pdf)
+
+5. [DMA Time Slot Allocation / Horizontal Line](http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node02D4.gif)
 
 ### Tricks
 

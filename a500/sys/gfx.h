@@ -29,7 +29,9 @@ __regargs void DeletePalette(PaletteT *palette);
 #define BM_DISPLAYABLE  2
 #define BM_INTERLEAVED  4
 #define BM_MINIMAL      8
-#define BM_FLAGMASK    15
+#define BM_HAM         16
+#define BM_EHB         32
+#define BM_FLAGMASK    63
 
 /* Flags than can be passed to functions that load Bitmap. */
 #define BM_LOAD_PALETTE 16
@@ -50,6 +52,8 @@ typedef struct Bitmap {
   UBYTE flags;
   UBYTE compression;
   PaletteT *palette;
+  ULONG pchgTotal;
+  UWORD *pchg;
   APTR  planes[7];
 } BitmapT;
 
