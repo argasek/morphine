@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include "std/specs.h"
 
 #define UNUSED __attribute__((unused))
 
