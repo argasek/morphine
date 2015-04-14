@@ -1,6 +1,7 @@
 #include "gfx/pixbuf.h"
 #include "gfx/circle.h"
 #include "gfx/line.h"
+#include "std/math.h"
 #include "std/debug.h"
 
 void DrawCircleBresenham(PixBufT *canvas, int x0, int y0, int diameter) {
@@ -487,4 +488,178 @@ void DrawDisk(PixBufT *canvas, int x, int y, int diameter) {
     } else {
         DrawDiskPrecalculated(canvas, x, y, diameter);
     }
+}
+
+typedef struct CirclePoint {
+    int x;
+    int y;
+    float i;
+    float l; // intensity
+} CirclePoint;
+
+void DrawAntialiasedSymmetricalPixels(PixBufT *canvas, CirclePoint p1, CirclePoint p2, int x, int y, int diameter, int even) {
+    uint8_t color1, color2;
+    int x0;
+    int y0;
+
+    //   1 | 2 | 3 | 4
+    //  ---------------
+    //   5 | 6 | 7 | 8
+
+    color1 = (uint8_t) (canvas->fgColor - ceil(p1.l * canvas->fgColor));
+    color2 = (uint8_t) (canvas->fgColor - ceil(p2.l * canvas->fgColor));
+
+    x0 = x - diameter;
+
+    // 5
+    PutPixel(canvas, x0 + p1.y, y + p1.x - even, color1);
+    PutPixel(canvas, x0 + p2.y, y + p2.x - even, color2);
+    // 1
+    PutPixel(canvas, x0 + p1.y, y - p1.x, color1);
+    PutPixel(canvas, x0 + p2.y, y - p2.x, color2);
+
+    x0 = x + diameter;
+
+    // 8
+    PutPixel(canvas, x0 - p1.y - even, y + p1.x - even, color1);
+    PutPixel(canvas, x0 - p2.y - even, y + p2.x - even, color2);
+    // 4
+    PutPixel(canvas, x0 - p1.y - even, y - p1.x, color1);
+    PutPixel(canvas, x0 - p2.y - even, y - p2.x, color2);
+
+    y0 = y - diameter;
+
+    // 3
+    PutPixel(canvas, x + p1.x - even, y0 + p1.y, color1);
+    PutPixel(canvas, x + p2.x - even, y0 + p2.y, color2);
+    // 2
+    PutPixel(canvas, x - p1.x, y0 + p1.y, color1);
+    PutPixel(canvas, x - p2.x, y0 + p2.y, color2);
+
+    y0 = y + diameter;
+
+    // 6
+    PutPixel(canvas, x - p1.x, y0 - p1.y - even, color1);
+    PutPixel(canvas, x - p2.x, y0 - p2.y - even, color2);
+    // 7
+    PutPixel(canvas, x + p1.x - even, y0 - p1.y - even, color1);
+    PutPixel(canvas, x + p2.x - even, y0 - p2.y - even, color2);
+}
+
+// Based on:
+//
+// "Recursive algorithm for circle anti-aliasing"
+// by Yin Liang Jia, Jing Gao & Bing Yang Li
+//
+void DrawCircleAntialiased(PixBufT *canvas, int x, int y, int diameter) {
+    CirclePoint P, T, G, M, B;
+
+    const int even = !(diameter & 1);
+    int i, r, x0, y0;
+    int ince, incne, eight;
+
+    float r2, r8, rsqrt2, inv_r2;
+    float error_adj1, error_adj2;
+    float treshold1, treshold2;
+
+    if (diameter < 4) DrawCircle(canvas, x, y, diameter);
+
+    r = diameter >> 1;
+    x0 = x + r;
+    y0 = y + r;
+
+    r2 = (float) diameter;
+    r8 = (float) (diameter << 2);
+    rsqrt2 = (float) M_SQRT2 * (float) r;
+    inv_r2 = 1.0f / r2;
+    error_adj1 = (1.0f / r8);
+    error_adj2 = (3.0f / r8);
+
+    treshold1 = 0.5f + rsqrt2;
+    treshold2 = 0.5f - rsqrt2;
+
+    //   P | T
+    //  -------
+    //   G | M
+    //  -------
+    //     | B
+    //
+
+    // Initial pixels
+    G.x = 0;
+    G.y = r;
+    G.i = 0.0f;
+
+    P.x = 0;
+    P.y = r - 1;
+    P.i = 1.0f - r2;
+
+    ince = 1;
+    incne = 4 - diameter;
+
+    // Magic. Don't touch.
+    if (r > 5) {
+        eight = lroundf((float) r * M_SQRT1_2);
+        if (diameter == 31 || diameter == 36) {
+            eight -= 1;
+        }
+    } else {
+        eight = (int) truncf((float) r * M_SQRT1_2);
+    }
+
+    if (!even) {
+        PutPixel(canvas, x0, y0 + r, canvas->fgColor);
+        PutPixel(canvas, x0, y0 - r, canvas->fgColor);
+        PutPixel(canvas, x0 - r, y0, canvas->fgColor);
+        PutPixel(canvas, x0 + r, y0, canvas->fgColor);
+    }
+
+    for (i = 0; i < eight; i++) {
+        // Calculate coordinate of pixels
+        T.x = P.x + 1;
+        T.y = P.y;
+
+        M.x = G.x + 1;
+        M.y = G.y;
+
+        B.x = G.x + 1;
+        B.y = G.y + 1;
+
+        // Calculate iM
+        M.i = (float) ince + G.i;
+
+        // We choose pixels T, M
+        if (M.i <= 0.0) {
+            T.i = (float) ince + P.i;
+
+            // Calculate intensities based on (2) & (3), (4) & (5)
+            T.l = (T.i * inv_r2) - (T.i <= treshold1 ? error_adj1 : error_adj2);
+            M.l = -(M.i * inv_r2) + (treshold2 <= M.i ? error_adj1 : error_adj2);
+
+            incne += 2;
+
+            DrawAntialiasedSymmetricalPixels(canvas, T, M, x0, y0, diameter, even);
+
+            P = T;
+            G = M;
+
+            // We choose pixels M, B
+        } else {
+            B.i = (float) incne + G.i;
+
+            // Calculate intensities based on (6) & (7), (8) & (9)
+            M.l = (M.i * inv_r2) - (M.i <= treshold1 ? error_adj1 : error_adj2);
+            B.l = -(B.i * inv_r2) + (treshold2 <= B.i ? error_adj1 : error_adj2);
+
+            incne += 4;
+
+            DrawAntialiasedSymmetricalPixels(canvas, M, B, x0, y0, diameter, even);
+
+            P = M;
+            G = B;
+
+        }
+        ince += 2;
+    }
+
 }

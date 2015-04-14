@@ -47,7 +47,7 @@ void TearDownEffect() {
  * Effect rendering functions.
  */
 int effect = 0;
-const int lastEffect = 1;
+const int lastEffect = 2;
 
 void RenderDiskWithFgColorSwap(PixBufT *canvas, int adjust, int diameter, const int x, const int y) {
   int radius, adjustedDiameter = diameter - adjust;
@@ -81,6 +81,7 @@ void RenderDisks(int frameNumber) {
   PixBufT *buffer = R_("Buffer");
   PixBufT *canvas = R_("Canvas");
   int diameter = 64, hSpace = 0, cx, cy, y;
+  int i;
 
   PixBufClear(buffer);
 
@@ -90,10 +91,10 @@ void RenderDisks(int frameNumber) {
   hSpace = 0;
 
   if (effect == 0) {
+    diameter = 64;
+
     cx = diameter;
     cy = HEIGHT >> 1;
-
-    DrawCircle(buffer, (WIDTH - 256) >> 1, 0, 256);
 
     y = 64 + 9;
     DrawTripleLine(buffer, y);
@@ -113,6 +114,24 @@ void RenderDisks(int frameNumber) {
     diameter = 64;
     hSpace += diameter + (diameter >> 1);
     RenderDiskWithDot(buffer, diameter, cx + hSpace, cy);
+
+    DrawCircleAntialiased(buffer, (WIDTH - 256) >> 1, 0, 256);
+
+  }
+
+  if (effect == 1) {
+
+    for (i = 256; i > 0; i -= 16) {
+      buffer->fgColor = (frameNumber+i < 128) ? (frameNumber+i) * 2 : (255 - frameNumber+i) * 2;
+
+      diameter = i;
+      DrawCircleAntialiased(buffer, (WIDTH - diameter) >> 1, (HEIGHT - diameter) >> 1, diameter);
+
+    }
+
+    diameter = 4;
+
+    DrawCircleAntialiased(buffer, (WIDTH - diameter) >> 1, (HEIGHT - diameter) >> 1, diameter);
 
   }
 
