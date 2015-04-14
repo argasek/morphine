@@ -3,7 +3,7 @@
 #include "gfx/line.h"
 #include "std/debug.h"
 
-static inline void DrawCircleBresenham(PixBufT *canvas, int x0, int y0, int diameter) {
+void DrawCircleBresenham(PixBufT *canvas, int x0, int y0, int diameter) {
     const int even = !(diameter & 1);
     int radius = diameter >> 1;
     int error = 1 - radius;
@@ -54,7 +54,7 @@ static inline void DrawCircleBresenham(PixBufT *canvas, int x0, int y0, int diam
     - top and bottom lines can be drawn using just PutPixel
     - horizontal lines may be drawn using simple buffer filling (width / 2 words, + 0/1 byte)
 */
-static inline void DrawDiskBresenham(PixBufT *canvas, int x0, int y0, int diameter) {
+void DrawDiskBresenham(PixBufT *canvas, int x0, int y0, int diameter) {
     const int even = !(diameter & 1);
     int radius = diameter >> 1;
     int error = 1 - radius;
@@ -99,7 +99,7 @@ static inline void DrawDiskBresenham(PixBufT *canvas, int x0, int y0, int diamet
 #define PP16 { data16 = (uint16_t *) (canvas->data + index); *data16 = color16; }
 #define PP16_ADJUST(adjustment) { data16 = (uint16_t *) (canvas->data + index); *data16 = color16; index += adjustment; }
 
-static inline void DrawCirclePrecalculated(PixBufT *canvas, int x0, int y0, int diameter) {
+void DrawCirclePrecalculated(PixBufT *canvas, int x0, int y0, int diameter) {
     size_t index = x0 + canvas->width * y0;
     switch (diameter) {
         // Single pixel
@@ -257,7 +257,7 @@ static inline void DrawCirclePrecalculated(PixBufT *canvas, int x0, int y0, int 
     }
 }
 
-static inline void DrawDiskPrecalculated(PixBufT *canvas, int x0, int y0, int diameter) {
+void DrawDiskPrecalculated(PixBufT *canvas, int x0, int y0, int diameter) {
     size_t index = x0 + canvas->width * y0;
     uint16_t *data16;
     uint16_t color16 = (canvas->fgColor << 8) + canvas->fgColor;
