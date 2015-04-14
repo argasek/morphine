@@ -15,41 +15,41 @@
 ; d0 [int] width
 ; d1 [int] height
 
-half    equr    d2
-min     equr    d3
-max     equr    d4
-wrap    equr    d5
-saved   equrl   d2-d5/a2
+half_sfm    equr    d2
+min_sfm     equr    d3
+max_sfm     equr    d4
+wrap_sfm    equr    d5
+saved_sfm   equrl   d2-d5/a2
 
 _StepperFromMap:
-        movem.l saved,-(sp)
+        movem.l saved_sfm,-(sp)
         subq.l  #1,d1
         mulu.l  d0,d1
         lea     (a0,d0.l*4),a1
 
-        moveq.l #16,half
+        moveq.l #16,half_sfm
         move.l  _UVMapExpanderThreshold,d0
-        asl.l   half,d0
-        move.l  d0,max
+        asl.l   half_sfm,d0
+        move.l  d0,max_sfm
         neg.l   d0
-        move.l  d0,min
-        move.l  #$01000000,wrap
+        move.l  d0,min_sfm
+        move.l  #$01000000,wrap_sfm
 
 .loop:
         move.l  (a1)+,d0
         sub.l   (a0)+,d0
 
-        cmp.l   max,d0
-        ble.s   .minus
+        cmp.l   max_sfm,d0
+        ble.s   .min_sfmus
         
-        sub.l   wrap,d0
+        sub.l   wrap_sfm,d0
         bra.s   .ok
 
-.minus:  
-        cmp.l   min,d0
+.min_sfmus:  
+        cmp.l   min_sfm,d0
         bge.s   .ok
 
-        add.l   wrap,d0
+        add.l   wrap_sfm,d0
         bra.s   .ok
 
 .ok:
@@ -58,7 +58,7 @@ _StepperFromMap:
         subq.l  #1,d1
         bgt.s   .loop
 
-        movem.l (sp)+,saved
+        movem.l (sp)+,saved_sfm
         rts
 
 
@@ -67,10 +67,10 @@ _StepperFromMap:
 ; d0 [int] width
 ; d1 [int] height
 
-saved   equrl   d2-d4/a2
+saved_fsfm   equrl   d2-d4/a2
 
 _FastStepperFromMap:
-        movem.l saved,-(sp)
+        movem.l saved_fsfm,-(sp)
         move.l  d1,d4
         subq.l  #1,d4
         mulu.l  d0,d4
@@ -96,7 +96,7 @@ _FastStepperFromMap:
         subq.l  #4,d4
         bgt.s   .loop
 
-        movem.l (sp)+,saved
+        movem.l (sp)+,saved_fsfm
         rts
 
 ; a0 [int16_t *] dst
@@ -175,23 +175,23 @@ _FastExpandLine8x:
 ; a1 [int *] src
 ; d2 [int] width
 
-saved   equrl   d2-d7/a2-a3
-wrap    equr    d7
-max     equr    a2
-min     equr    a3
+saved_el8x   equrl   d2-d7/a2-a3
+wrap_el8x    equr    d7
+max_el8x     equr    a2
+min_el8x     equr    a3
 
 _ExpandLine8x:
-        movem.l saved,-(sp)
+        movem.l saved_el8x,-(sp)
 
         move.l  (a1)+,xs
         move.l  (a1)+,xe
         moveq.l #16,half
         move.l  _UVMapExpanderThreshold,d0
         asl.l   half,d0
-        move.l  d0,max
+        move.l  d0,max_el8x
         neg.l   d0
-        move.l  d0,min
-        move.l  #$01000000,wrap
+        move.l  d0,min_el8x
+        move.l  #$01000000,wrap_el8x
 
         nop
 
@@ -200,17 +200,17 @@ _ExpandLine8x:
         sub.l   xs,dx
 
 .plus:
-        cmp.l   max,dx
-        ble.s   .minus
+        cmp.l   max_el8x,dx
+        ble.s   .min_el8xus
         
-        sub.l   wrap,dx
+        sub.l   wrap_el8x,dx
         bra.s   .ok
 
-.minus:  
-        cmp.l   min,dx
+.min_el8xus:  
+        cmp.l   min_el8x,dx
         bge.s   .ok
 
-        add.l   wrap,dx
+        add.l   wrap_el8x,dx
         bra.s   .ok
 
 .ok:
@@ -263,7 +263,7 @@ _ExpandLine8x:
         subq.l  #1,d2
         bne.s   .loop
 
-        movem.l (sp)+,saved
+        movem.l (sp)+,saved_el8x
         rts
 
 ; a0 [int *] x

@@ -51,11 +51,6 @@ _RawBlitNormal:
 ; d2 [int] sstride
 ; d3 [int] dstride
 
-width   equr d0
-height  equr d1
-sstride equr a5
-dstride equr a6
-
 saved   equrl d2-d3/a5-a6
 
 _RawBlitTransparent:

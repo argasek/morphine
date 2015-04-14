@@ -1,7 +1,7 @@
 #ifndef __UVMAP_SCALING_OPT_H__
 #define __UVMAP_SCALING_OPT_H__
 
-#include "std/types.h"
+#include "std/fp16.h"
 
 void StepperFromMap(FP16 *map asm("a0"), FP16 *stepper asm("a2"),
                     int width asm("d0"), int height asm("d1"));
